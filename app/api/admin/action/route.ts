@@ -221,7 +221,7 @@ async function syncPlayerSuspension(playerId: number) {
   );
 
   const yellowTriggers = yellowEvents
-    .filter((_event: any, index: number) => (index + 1) % 2 === 0)
+    .filter((_event: any, index: number) => (index + 1) % 3 === 0)
     .map((event: any) => ({
       event,
 

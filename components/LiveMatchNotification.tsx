@@ -902,7 +902,7 @@ export default function LiveMatchNotification() {
               message:
                 row.reason === "RED_CARD"
                   ? `ใบแดง • แบน ${suspendedMatchText}`
-                  : `ใบเหลืองสะสมครบ 2 ใบ • แบน ${suspendedMatchText}`,
+                  : `ใบเหลืองสะสมครบ 3 ใบ • แบน ${suspendedMatchText}`,
 
               minute: null,
             });
@@ -949,41 +949,41 @@ export default function LiveMatchNotification() {
     if (notification.type === "MATCH_START") {
       return `
         border-red-500/60
-        bg-slate-950
+        theme-card
       `;
     }
 
     if (notification.type === "MATCH_FINISH") {
       return `
         border-green-500/60
-        bg-slate-950
+        theme-card
       `;
     }
 
     if (notification.type === "GOAL") {
       return `
         border-green-500/60
-        bg-slate-950
+        theme-card
       `;
     }
 
     if (notification.type === "YELLOW_CARD") {
       return `
         border-yellow-500/60
-        bg-slate-950
+        theme-card
       `;
     }
 
     if (notification.type === "RED_CARD") {
       return `
         border-red-500/60
-        bg-slate-950
+        theme-card
       `;
     }
 
     return `
       border-orange-500/60
-      bg-slate-950
+      theme-card
     `;
   }
 
@@ -1327,7 +1327,7 @@ export default function LiveMatchNotification() {
               ========================================= */
 
               <div className="mt-2">
-                <p className="text-white text-lg font-black">
+                <p className="theme-text text-lg font-black">
                   {notification.playerNumber !== null &&
                     notification.playerNumber !== undefined && (
                       <>
@@ -1357,21 +1357,7 @@ export default function LiveMatchNotification() {
                 MESSAGE
             =========================================== */}
 
-            <div
-              className="
-                mt-3
-
-                bg-slate-900
-
-                border
-                border-slate-800
-
-                rounded-xl
-
-                px-3
-                py-2
-              "
-            >
+            <div className="mt-3 theme-soft border theme-border rounded-xl px-3 py-2">
               <p
                 className="
                   text-sm

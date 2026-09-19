@@ -1,32 +1,363 @@
 @import "tailwindcss";
 
+/* =========================================================
+   DEFAULT THEME = DARK
+========================================================= */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #020617;
+  --foreground: #ffffff;
+
+  --surface: #0f172a;
+  --surface-soft: #1e293b;
+  --surface-hover: #334155;
+
+  --text-main: #ffffff;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+
+  --border: #1e293b;
+  --border-strong: #334155;
+
+  --green: #4ade80;
 }
+
+/* =========================================================
+   TAILWIND THEME
+   เก็บของเดิมไว้
+========================================================= */
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-kanit), var(--font-geist-sans), system-ui, sans-serif;
+
+  --font-sans:
+    var(--font-custom),
+    var(--font-kanit),
+    var(--font-geist-sans),
+    system-ui,
+    sans-serif;
+
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* =========================================================
+   LIGHT THEME
+   เปิดเมื่อ ThemeToggle ใส่ class="light" ที่ <html>
+========================================================= */
+
+html.light {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+
+  --surface: #ffffff;
+  --surface-soft: #f1f5f9;
+  --surface-hover: #e2e8f0;
+
+  --text-main: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+
+  --green: #16a34a;
+}
+
+/* =========================================================
+   BODY
+========================================================= */
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--background);
+  color: var(--foreground);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-kanit), Arial, Helvetica, sans-serif;
+
+  font-family:
+    var(--font-custom),
+    var(--font-kanit),
+    Arial,
+    Helvetica,
+    sans-serif;
+
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease;
+}
+
+/* =========================================================
+   THEME UTILITY CLASSES
+========================================================= */
+
+.theme-page {
+  background: var(--background);
+  color: var(--text-main);
+}
+
+.theme-card {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-main);
+}
+
+.theme-soft {
+  background: var(--surface-soft);
+  border-color: var(--border);
+}
+
+.theme-text {
+  color: var(--text-main);
+}
+
+.theme-secondary {
+  color: var(--text-secondary);
+}
+
+.theme-muted {
+  color: var(--text-muted);
+}
+
+.theme-border {
+  border-color: var(--border);
+}
+
+.theme-border-strong {
+  border-color: var(--border-strong);
+}
+
+/* =========================================================
+   THEME TOGGLE BUTTON
+========================================================= */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+
+  min-height: 32px;
+
+  padding: 6px 10px;
+
+  background: var(--surface);
+  color: var(--text-secondary);
+
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+
+  font-size: 11px;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.theme-toggle:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+/* =========================================================
+   LIGHT MODE OVERRIDES
+
+   รองรับ code เดิมที่ยังใช้ Tailwind เช่น
+   bg-slate-950
+   bg-slate-900
+   text-white
+   border-slate-800
+========================================================= */
+
+/* BACKGROUND */
+
+html.light .bg-slate-950 {
+  background-color: #f8fafc !important;
+}
+
+html.light .bg-slate-950\/40 {
+  background-color: rgba(248, 250, 252, 0.95) !important;
+}
+
+html.light .bg-slate-950\/60 {
+  background-color: rgba(248, 250, 252, 0.95) !important;
+}
+
+html.light .bg-slate-900 {
+  background-color: #ffffff !important;
+}
+
+html.light .bg-slate-900\/90 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+html.light .bg-slate-900\/60 {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+
+html.light .bg-slate-800 {
+  background-color: #f1f5f9 !important;
+}
+
+html.light .bg-slate-800\/40 {
+  background-color: #f1f5f9 !important;
+}
+
+/* =========================================================
+   TEXT
+========================================================= */
+
+html.light .text-white {
+  color: #0f172a !important;
+}
+
+html.light .text-slate-200 {
+  color: #334155 !important;
+}
+
+html.light .text-slate-300 {
+  color: #475569 !important;
+}
+
+html.light .text-slate-400 {
+  color: #64748b !important;
+}
+
+html.light .text-slate-500 {
+  color: #64748b !important;
+}
+
+html.light .text-slate-600 {
+  color: #475569 !important;
+}
+
+/* =========================================================
+   BORDER
+========================================================= */
+
+html.light .border-slate-800 {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .border-slate-800\/60 {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .border-slate-800\/80 {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .border-slate-700 {
+  border-color: #cbd5e1 !important;
+}
+
+html.light .divide-slate-800\/60 > :not(:last-child) {
+  border-color: #e2e8f0 !important;
+}
+
+/* =========================================================
+   IMPORTANT COLORS
+
+   สีพวกนี้ไม่ควรเปลี่ยนเป็นดำ/เทา
+========================================================= */
+
+html.light .text-green-400 {
+  color: #16a34a !important;
+}
+
+html.light .text-green-500 {
+  color: #16a34a !important;
+}
+
+html.light .text-red-300 {
+  color: #b91c1c !important;
+}
+
+html.light .text-red-400 {
+  color: #dc2626 !important;
+}
+
+html.light .text-red-500 {
+  color: #dc2626 !important;
+}
+
+html.light .text-yellow-400 {
+  color: #ca8a04 !important;
+}
+
+/* =========================================================
+   WARNING / RED CARD / BAN
+========================================================= */
+
+html.light .bg-red-950\/40 {
+  background-color: #fef2f2 !important;
+}
+
+html.light .bg-red-950\/60 {
+  background-color: #fef2f2 !important;
+}
+
+html.light .border-red-900\/60 {
+  border-color: #fecaca !important;
+}
+
+html.light .border-red-800\/80 {
+  border-color: #fecaca !important;
+}
+
+/* =========================================================
+   INPUT / SELECT / TEXTAREA
+========================================================= */
+
+html.light input,
+html.light select,
+html.light textarea {
+  color: #0f172a;
+}
+
+/* =========================================================
+   SCROLLBAR
+========================================================= */
+
+html {
+  scrollbar-color: #475569 #020617;
+}
+
+html.light {
+  scrollbar-color: #cbd5e1 #f8fafc;
+}
+
+.theme-input {
+  background: var(--card-soft);
+  color: var(--foreground);
+  border-color: var(--border-color);
+}
+
+.theme-input::placeholder {
+  color: var(--muted);
+}
+
+.theme-input option {
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.theme-hover:hover {
+  background: var(--hover-bg);
 }
 
 /* =========================================================
    LIVE NOTIFICATION
+   ของเดิมคุณ — เก็บไว้
 ========================================================= */
 
 @keyframes notificationSlide {

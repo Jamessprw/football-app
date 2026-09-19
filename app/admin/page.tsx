@@ -1,7 +1,11 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import ThemeToggle from "@/components/ThemeToggle";
+import PlayerAvatar from "@/components/PlayerAvatar";
+
 const ADMIN_TOKEN_KEY = "football_admin_token";
 
 /* =========================================================
@@ -13,6 +17,7 @@ interface Player {
   team_id: number;
   number: number;
   name: string;
+  image_url: string | null;
 }
 
 interface Team {
@@ -23,56 +28,262 @@ interface Team {
 
 interface Match {
   id: number;
-
   matchday: number;
-
   home_team_id: number;
   away_team_id: number;
-
   kickoff_time: string;
-
   home_score: number | null;
-
   away_score: number | null;
-
   status: "UPCOMING" | "LIVE" | "FINISHED";
-
   home?: Team;
   away?: Team;
 }
 
 interface MatchEvent {
   id: number;
-
   match_id: number;
-
   team_id: number;
-
   player_id: number;
-
   event_type: "GOAL" | "YELLOW_CARD" | "RED_CARD";
-
   minute: number | null;
-
   player?: Player;
 }
 
 interface AdminActionResult {
   success: boolean;
-
   message?: string;
-
   player?: Player;
-
   match?: Match;
-
   event?: MatchEvent;
-
   deleted_event_id?: number;
-
   home_score?: number;
-
   away_score?: number;
+}
+
+/* =========================================================
+   CURRENT MATCH
+========================================================= */
+
+function getCurrentMatchId(matchList: Match[]) {
+  if (matchList.length === 0) {
+    return null;
+  }
+
+  // 1. LIVE มาก่อน
+  const liveMatches = matchList
+    .filter((match) => match.status === "LIVE")
+    .sort(
+      (a, b) =>
+        new Date(a.kickoff_time).getTime() - new Date(b.kickoff_time).getTime(),
+    );
+
+  if (liveMatches.length > 0) {
+    return liveMatches[0].id;
+  }
+
+  const now = Date.now();
+
+  // 2. UPCOMING ที่ใกล้เวลาปัจจุบันที่สุด
+  const upcomingMatches = matchList
+    .filter((match) => match.status === "UPCOMING")
+    .sort(
+      (a, b) =>
+        new Date(a.kickoff_time).getTime() - new Date(b.kickoff_time).getTime(),
+    );
+
+  const futureMatch = upcomingMatches.find(
+    (match) => new Date(match.kickoff_time).getTime() >= now,
+  );
+
+  if (futureMatch) {
+    return futureMatch.id;
+  }
+
+  // ถ้ามี Upcoming แต่เวลา kickoff ผ่านแล้ว
+  if (upcomingMatches.length > 0) {
+    return upcomingMatches[0].id;
+  }
+
+  // 3. ถ้าไม่มี LIVE / UPCOMING ให้ Finished ล่าสุด
+  const finishedMatches = matchList
+    .filter((match) => match.status === "FINISHED")
+    .sort(
+      (a, b) =>
+        new Date(b.kickoff_time).getTime() - new Date(a.kickoff_time).getTime(),
+    );
+
+  return finishedMatches[0]?.id ?? null;
+}
+
+/* =========================================================
+   PLAYER PICKER
+========================================================= */
+
+function PlayerPicker({
+  players,
+  value,
+  disabled = false,
+  onChange,
+}: {
+  players: Player[];
+  value: string | null;
+  disabled?: boolean;
+  onChange: (value: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const selectedPlayer = players.find(
+    (player) => String(player.id) === String(value),
+  );
+
+  const sortedPlayers = [...players].sort(
+    (a, b) =>
+      Number(a.number) - Number(b.number) || a.name.localeCompare(b.name),
+  );
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+    }
+  }, [disabled]);
+
+  useEffect(() => {
+    function handleOutsideClick(event: MouseEvent) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+        className="
+          theme-input
+          w-full
+          h-[36px]
+          border
+          rounded-xl
+          px-2
+          flex
+          items-center
+          justify-between
+          gap-2
+          outline-none
+          focus:border-green-500
+          disabled:opacity-50
+          disabled:cursor-not-allowed
+        "
+      >
+        {selectedPlayer ? (
+          <div className="flex items-center gap-2 min-w-0">
+            <PlayerAvatar
+              imageUrl={selectedPlayer.image_url}
+              name={selectedPlayer.name}
+              size="xs"
+            />
+
+            <span className="text-xs theme-text truncate">
+              #{selectedPlayer.number} {selectedPlayer.name}
+            </span>
+          </div>
+        ) : (
+          <span className="text-xs theme-muted">-- เลือกนักเตะ --</span>
+        )}
+
+        <span
+          className={`text-[9px] theme-muted transition-transform ${
+            open ? "rotate-180" : ""
+          }`}
+        >
+          ▼
+        </span>
+      </button>
+
+      {open && !disabled && (
+        <div
+          className="
+            absolute
+            top-[40px]
+            left-0
+            right-0
+            z-[100]
+            max-h-60
+            overflow-y-auto
+            theme-card
+            border
+            theme-border
+            rounded-xl
+            shadow-xl
+          "
+        >
+          {sortedPlayers.length === 0 ? (
+            <div className="px-3 py-4 text-center text-xs theme-muted">
+              ไม่มีนักเตะในทีมนี้
+            </div>
+          ) : (
+            sortedPlayers.map((player) => {
+              const isSelected = String(player.id) === String(value);
+
+              return (
+                <button
+                  key={player.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(String(player.id));
+                    setOpen(false);
+                  }}
+                  className={`
+                    w-full
+                    flex
+                    items-center
+                    gap-2.5
+                    px-3
+                    py-2
+                    text-left
+                    border-b
+                    last:border-b-0
+                    theme-border
+                    transition
+                    ${isSelected ? "bg-green-500/10" : "theme-hover"}
+                  `}
+                >
+                  <PlayerAvatar
+                    imageUrl={player.image_url}
+                    name={player.name}
+                    size="sm"
+                  />
+
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold theme-text truncate">
+                      #{player.number} {player.name}
+                    </div>
+                  </div>
+
+                  {isSelected && (
+                    <span className="text-green-400 text-xs font-black">✓</span>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* =========================================================
@@ -83,41 +294,38 @@ export default function AdminPage() {
   const router = useRouter();
 
   const [authenticated, setAuthenticated] = useState(false);
-
   const [checkingSession, setCheckingSession] = useState(true);
 
   const [password, setPassword] = useState("");
-
   const [loginError, setLoginError] = useState("");
-
   const [loginLoading, setLoginLoading] = useState(false);
 
   const [matches, setMatches] = useState<Match[]>([]);
-
   const [teams, setTeams] = useState<Team[]>([]);
-
   const [loading, setLoading] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
+  // Check List / Current Match
+  const [checkListMode, setCheckListMode] = useState(false);
+
+  // Add Player
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
 
   const [playerNumber, setPlayerNumber] = useState("");
-
   const [playerName, setPlayerName] = useState("");
+  const [addingPlayer, setAddingPlayer] = useState(false);
 
   /* =======================================================
      PLAYER LIST
   ======================================================= */
 
   const [showPlayerList, setShowPlayerList] = useState(false);
-
   const [expandedTeamId, setExpandedTeamId] = useState<number | null>(null);
 
   const [editingPlayerId, setEditingPlayerId] = useState<number | null>(null);
 
   const [editPlayerNumber, setEditPlayerNumber] = useState("");
-
   const [editPlayerName, setEditPlayerName] = useState("");
-
   const [playerSaving, setPlayerSaving] = useState(false);
 
   /* =======================================================
@@ -131,8 +339,10 @@ export default function AdminPage() {
   async function checkSession() {
     setAuthenticated(false);
     setCheckingSession(true);
+
     try {
       const token = sessionStorage.getItem(ADMIN_TOKEN_KEY);
+
       if (!token) {
         setAuthenticated(false);
         return;
@@ -151,6 +361,7 @@ export default function AdminPage() {
         setAuthenticated(false);
         return;
       }
+
       const text = await response.text();
 
       if (!text) {
@@ -160,6 +371,7 @@ export default function AdminPage() {
       }
 
       const result = JSON.parse(text);
+
       if (result.authenticated === true) {
         setAuthenticated(true);
         return;
@@ -169,6 +381,7 @@ export default function AdminPage() {
       setAuthenticated(false);
     } catch (error) {
       console.error("SESSION CHECK ERROR:", error);
+
       sessionStorage.removeItem(ADMIN_TOKEN_KEY);
       setAuthenticated(false);
     } finally {
@@ -180,6 +393,7 @@ export default function AdminPage() {
     function handleVisibilityChange() {
       if (document.visibilityState === "visible") {
         const token = sessionStorage.getItem(ADMIN_TOKEN_KEY);
+
         if (!token) {
           setAuthenticated(false);
         }
@@ -187,6 +401,7 @@ export default function AdminPage() {
     }
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
@@ -219,8 +434,6 @@ export default function AdminPage() {
       });
 
       const rawText = await response.text();
-      console.log("LOGIN STATUS:", response.status);
-      console.log("LOGIN RAW RESPONSE:", rawText);
 
       let result: {
         success?: boolean;
@@ -233,7 +446,9 @@ export default function AdminPage() {
           result = JSON.parse(rawText);
         } catch (parseError) {
           console.error("LOGIN JSON PARSE ERROR:", parseError);
+
           setLoginError("Server ตอบกลับข้อมูลไม่ถูกต้อง");
+
           return;
         }
       }
@@ -242,19 +457,23 @@ export default function AdminPage() {
         setLoginError(
           result.message || `เข้าสู่ระบบไม่สำเร็จ (${response.status})`,
         );
+
         return;
       }
 
       if (!result.token) {
         setLoginError("Server ไม่ได้ส่ง Admin Token กลับมา");
+
         return;
       }
 
       sessionStorage.setItem(ADMIN_TOKEN_KEY, result.token);
+
       setPassword("");
       setAuthenticated(true);
     } catch (error) {
       console.error("LOGIN ERROR:", error);
+
       setLoginError("ไม่สามารถเชื่อมต่อระบบ Admin ได้");
     } finally {
       setLoginLoading(false);
@@ -268,6 +487,7 @@ export default function AdminPage() {
   async function handleLogout() {
     sessionStorage.removeItem(ADMIN_TOKEN_KEY);
     setAuthenticated(false);
+
     try {
       await fetch("/api/admin/logout", {
         method: "POST",
@@ -276,6 +496,7 @@ export default function AdminPage() {
     } catch (error) {
       console.error("LOGOUT ERROR:", error);
     }
+
     window.location.replace("/");
   }
 
@@ -288,10 +509,10 @@ export default function AdminPage() {
       .from("matches")
       .select(
         `
-              *,
-              home:home_team_id(*),
-              away:away_team_id(*)
-            `,
+          *,
+          home:home_team_id(*),
+          away:away_team_id(*)
+        `,
       )
       .order("kickoff_time", {
         ascending: true,
@@ -305,9 +526,9 @@ export default function AdminPage() {
       .from("teams")
       .select(
         `
-              *,
-              players(*)
-            `,
+          *,
+          players(*)
+        `,
       )
       .order("id", {
         ascending: true,
@@ -327,7 +548,6 @@ export default function AdminPage() {
     }));
 
     setMatches((matchData as Match[]) || []);
-
     setTeams(formattedTeams);
   }, []);
 
@@ -360,19 +580,32 @@ export default function AdminPage() {
       body: JSON.stringify(data),
     });
 
-    const result: AdminActionResult = await response.json();
-    console.log("ADMIN ACTION:", data);
-    console.log("ADMIN ACTION RESPONSE:", response.status, result);
+    const rawText = await response.text();
+
+    let result: AdminActionResult = {
+      success: false,
+    };
+
+    if (rawText) {
+      try {
+        result = JSON.parse(rawText);
+      } catch {
+        throw new Error("Server ตอบกลับข้อมูลไม่ถูกต้อง");
+      }
+    }
 
     if (response.status === 401) {
       sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+
       setAuthenticated(false);
+
       throw new Error("Admin Session หมดอายุ กรุณาเข้าสู่ระบบใหม่");
     }
 
     if (!response.ok || !result.success) {
       throw new Error(result.message || "เกิดข้อผิดพลาด");
     }
+
     return result;
   }
 
@@ -385,23 +618,24 @@ export default function AdminPage() {
 
     if (!selectedTeamId || !playerNumber || !playerName.trim()) {
       alert("กรุณากรอกข้อมูลให้ครบ");
-
       return;
     }
+
+    if (addingPlayer) {
+      return;
+    }
+
+    setAddingPlayer(true);
 
     try {
       await adminAction({
         action: "ADD_PLAYER",
-
         teamId: Number(selectedTeamId),
-
         number: Number(playerNumber),
-
         name: playerName.trim(),
       });
 
       setPlayerNumber("");
-
       setPlayerName("");
 
       await fetchData();
@@ -409,6 +643,8 @@ export default function AdminPage() {
       alert("เพิ่มนักเตะเรียบร้อย");
     } catch (error) {
       alert(error instanceof Error ? error.message : "เกิดข้อผิดพลาด");
+    } finally {
+      setAddingPlayer(false);
     }
   }
 
@@ -418,40 +654,32 @@ export default function AdminPage() {
 
   function handleEditPlayer(player: Player) {
     setEditingPlayerId(player.id);
-
     setEditPlayerNumber(String(player.number));
-
     setEditPlayerName(player.name);
   }
 
   function handleCancelEditPlayer() {
     setEditingPlayerId(null);
-
     setEditPlayerNumber("");
-
     setEditPlayerName("");
   }
 
   async function handleSavePlayer(playerId: number) {
     const number = Number(editPlayerNumber);
-
     const name = editPlayerName.trim();
 
     if (editPlayerNumber === "") {
       alert("กรุณากรอกเบอร์เสื้อ");
-
       return;
     }
 
     if (Number.isNaN(number) || number < 0) {
       alert("เบอร์เสื้อไม่ถูกต้อง");
-
       return;
     }
 
     if (!name) {
       alert("กรุณากรอกชื่อนักเตะ");
-
       return;
     }
 
@@ -460,17 +688,10 @@ export default function AdminPage() {
     try {
       const result = await adminAction({
         action: "UPDATE_PLAYER",
-
         playerId,
-
         number,
-
         name,
       });
-
-      /*
-       * UPDATE LOCAL STATE ทันที
-       */
 
       if (result.player) {
         setTeams((currentTeams) =>
@@ -482,7 +703,6 @@ export default function AdminPage() {
                 player.id === result.player?.id
                   ? {
                       ...player,
-
                       ...result.player,
                     }
                   : player,
@@ -498,10 +718,6 @@ export default function AdminPage() {
 
       handleCancelEditPlayer();
 
-      /*
-       * Background confirm
-       */
-
       await fetchData();
     } catch (error) {
       console.error("SAVE PLAYER ERROR:", error);
@@ -513,6 +729,93 @@ export default function AdminPage() {
       );
     } finally {
       setPlayerSaving(false);
+    }
+  }
+
+  /* =======================================================
+   DOWNLOAD EXCEL
+======================================================= */
+
+  async function handleDownloadExcel() {
+    if (exportingExcel) {
+      return;
+    }
+
+    const token = sessionStorage.getItem(ADMIN_TOKEN_KEY);
+
+    if (!token) {
+      setAuthenticated(false);
+      alert("กรุณาเข้าสู่ระบบ Admin ใหม่");
+      return;
+    }
+
+    setExportingExcel(true);
+
+    try {
+      const response = await fetch("/api/admin/export-excel", {
+        method: "GET",
+
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+
+        cache: "no-store",
+      });
+
+      if (response.status === 401) {
+        sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+
+        setAuthenticated(false);
+
+        throw new Error("Admin Session หมดอายุ กรุณาเข้าสู่ระบบใหม่");
+      }
+
+      if (!response.ok) {
+        const contentType = response.headers.get("content-type");
+
+        if (contentType?.includes("application/json")) {
+          const result = await response.json();
+
+          throw new Error(result.message || "ไม่สามารถ Download Excel ได้");
+        }
+
+        throw new Error("ไม่สามารถ Download Excel ได้");
+      }
+
+      const blob = await response.blob();
+
+      const disposition = response.headers.get("content-disposition");
+
+      let fileName = "NMB_Football_League_Report.xlsx";
+
+      const fileNameMatch = disposition?.match(/filename="?([^"]+)"?/i);
+
+      if (fileNameMatch?.[1]) {
+        fileName = fileNameMatch[1];
+      }
+
+      const url = window.URL.createObjectURL(blob);
+
+      const anchor = document.createElement("a");
+
+      anchor.href = url;
+      anchor.download = fileName;
+
+      document.body.appendChild(anchor);
+
+      anchor.click();
+
+      anchor.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("DOWNLOAD EXCEL ERROR:", error);
+
+      alert(
+        error instanceof Error ? error.message : "ไม่สามารถ Download Excel ได้",
+      );
+    } finally {
+      setExportingExcel(false);
     }
   }
 
@@ -532,20 +835,14 @@ export default function AdminPage() {
     try {
       const result = await adminAction({
         action: "START_MATCH",
-
         matchId,
       });
-
-      /*
-       * LOCAL UPDATE
-       */
 
       setMatches((currentMatches) =>
         currentMatches.map((match) =>
           match.id === matchId
             ? {
                 ...match,
-
                 status: "LIVE",
               }
             : match,
@@ -558,17 +855,12 @@ export default function AdminPage() {
             match.id === matchId
               ? {
                   ...match,
-
                   ...result.match,
                 }
               : match,
           ),
         );
       }
-
-      /*
-       * Confirm จาก DB
-       */
 
       await fetchData();
     } catch (error) {
@@ -584,9 +876,7 @@ export default function AdminPage() {
 
   async function handleFinishMatch(
     matchId: number,
-
     homeScore: number,
-
     awayScore: number,
   ) {
     const confirmed = window.confirm("ยืนยันจบการแข่งขัน?");
@@ -600,11 +890,8 @@ export default function AdminPage() {
     try {
       const result = await adminAction({
         action: "FINISH_MATCH",
-
         matchId,
-
         homeScore,
-
         awayScore,
       });
 
@@ -614,29 +901,18 @@ export default function AdminPage() {
       const newAwayScore =
         typeof result.away_score === "number" ? result.away_score : awayScore;
 
-      /*
-       * LOCAL UPDATE
-       */
-
       setMatches((currentMatches) =>
         currentMatches.map((match) =>
           match.id === matchId
             ? {
                 ...match,
-
                 status: "FINISHED",
-
                 home_score: newHomeScore,
-
                 away_score: newAwayScore,
               }
             : match,
         ),
       );
-
-      /*
-       * Confirm DB
-       */
 
       await fetchData();
 
@@ -649,13 +925,36 @@ export default function AdminPage() {
   }
 
   /* =======================================================
+     CURRENT MATCH DISPLAY
+  ======================================================= */
+
+  const currentMatchId = getCurrentMatchId(matches);
+
+  const displayedMatches = checkListMode
+    ? [...matches].sort((a, b) => {
+        if (a.id === currentMatchId) {
+          return -1;
+        }
+
+        if (b.id === currentMatchId) {
+          return 1;
+        }
+
+        return (
+          new Date(a.kickoff_time).getTime() -
+          new Date(b.kickoff_time).getTime()
+        );
+      })
+    : matches;
+
+  /* =======================================================
      LOADING SESSION
   ======================================================= */
 
   if (checkingSession) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">
-        กำลังตรวจสอบสิทธิ์...
+      <div className="min-h-screen theme-page flex items-center justify-center">
+        <span className="theme-muted font-semibold">กำลังตรวจสอบสิทธิ์...</span>
       </div>
     );
   }
@@ -666,20 +965,26 @@ export default function AdminPage() {
 
   if (!authenticated) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="min-h-screen theme-page flex items-center justify-center p-4">
+        <div className="absolute top-4 right-4">
+          <ThemeToggle />
+        </div>
+
         <form
           onSubmit={handleLogin}
-          className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6"
+          className="w-full max-w-sm theme-card border rounded-2xl p-6 shadow-lg"
         >
           <div className="text-center mb-6">
             <div className="text-4xl mb-3">🔐</div>
 
-            <h1 className="text-2xl font-black text-white">ADMIN LOGIN</h1>
+            <h1 className="text-2xl font-black theme-text">ADMIN LOGIN</h1>
 
-            <p className="text-xs text-slate-500 mt-1">NMB FOOTBALL LEAGUE</p>
+            <p className="text-xs theme-muted mt-1">NMB FOOTBALL LEAGUE</p>
           </div>
 
-          <label className="text-xs font-bold text-slate-400">Admin Code</label>
+          <label className="text-xs font-bold theme-secondary">
+            Admin Code
+          </label>
 
           <input
             type="password"
@@ -691,7 +996,7 @@ export default function AdminPage() {
             }}
             placeholder="กรอกรหัส Admin"
             autoFocus
-            className="w-full mt-2 px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-white outline-none focus:border-green-500"
+            className="theme-input w-full mt-2 px-4 py-3 rounded-xl border outline-none focus:border-green-500"
           />
 
           {loginError && (
@@ -701,7 +1006,7 @@ export default function AdminPage() {
           <button
             type="submit"
             disabled={loginLoading}
-            className="w-full mt-4 py-3 rounded-xl bg-green-500 hover:bg-green-400 disabled:opacity-50 text-slate-950 font-black"
+            className="w-full mt-4 py-3 rounded-xl bg-green-500 hover:bg-green-400 disabled:opacity-50 text-slate-950 font-black transition"
           >
             {loginLoading ? "กำลังตรวจสอบ..." : "Sign in"}
           </button>
@@ -709,7 +1014,7 @@ export default function AdminPage() {
           <button
             type="button"
             onClick={() => router.push("/")}
-            className="w-full mt-2 py-2 text-xs text-slate-500 hover:text-white"
+            className="w-full mt-2 py-2 text-xs theme-muted hover:text-green-400 transition"
           >
             ← กลับหน้าหลัก
           </button>
@@ -723,355 +1028,456 @@ export default function AdminPage() {
   ======================================================= */
 
   return (
-    <div className="max-w-4xl mx-auto p-4 min-h-screen bg-slate-950 text-white space-y-8">
+    <div className="min-h-screen theme-page">
       {/* ===================================================
-          HEADER
+          FIX NATIVE SELECT DARK THEME
       =================================================== */}
 
-      <header className="flex items-center justify-between border-b border-slate-800 pb-4">
-        <div>
-          <h1 className="text-2xl font-black">
-            ADMIN <span className="text-green-400">PANEL</span>
-          </h1>
+      <style jsx global>{`
+        .admin-select {
+          color: inherit;
+        }
 
-          <p className="text-xs text-slate-400">Live Match Control</p>
-        </div>
+        .admin-select option {
+          background-color: #ffffff;
+          color: #0f172a;
+        }
 
-        <div className="flex gap-2">
-          <button
-            onClick={() => router.push("/")}
-            className="text-xs px-3 py-2 border border-slate-700 rounded-lg text-slate-400 hover:text-white hover:border-slate-500 transition"
-          >
-            หน้าเว็บ
-          </button>
+        .admin-select option:checked {
+          background-color: #2563eb;
+          color: #ffffff;
+        }
+      `}</style>
 
-          <button
-            onClick={handleLogout}
-            className="text-xs px-3 py-2 border border-red-900 rounded-lg text-red-400 hover:bg-red-950 transition"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
+      <div className="max-w-4xl mx-auto p-4 min-h-screen space-y-8">
+        {/* ===================================================
+            HEADER
+        =================================================== */}
 
-      {/* ===================================================
-          1. ADD PLAYER
-      =================================================== */}
+        <header className="flex items-center justify-between border-b theme-border pb-4 gap-3">
+          <div>
+            <h1 className="text-2xl font-black theme-text">
+              ADMIN <span className="text-green-400">PANEL</span>
+            </h1>
 
-      <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-        <h2 className="text-green-400 font-black mb-4">1. เพิ่มนักเตะ</h2>
-
-        <form
-          onSubmit={handleAddPlayer}
-          className="grid grid-cols-1 md:grid-cols-4 gap-3"
-        >
-          <select
-            value={selectedTeamId ?? ""}
-            onChange={(event) => setSelectedTeamId(event.target.value || null)}
-            className="w-full h-[42px] bg-slate-950 border border-slate-800 rounded-xl px-3 text-sm text-white outline-none focus:border-green-500"
-          >
-            <option value="">-- เลือกทีม --</option>
-
-            {teams.map((team) => (
-              <option key={team.id} value={String(team.id)}>
-                {team.name}
-              </option>
-            ))}
-          </select>
-
-          <input
-            type="number"
-            min="0"
-            value={playerNumber}
-            onChange={(event) => setPlayerNumber(event.target.value)}
-            placeholder="เบอร์เสื้อ"
-            className="h-[42px] bg-slate-950 border border-slate-800 rounded-xl px-3 text-sm text-white outline-none focus:border-green-500"
-          />
-
-          <input
-            type="text"
-            value={playerName}
-            onChange={(event) => setPlayerName(event.target.value)}
-            placeholder="ชื่อนักเตะ"
-            className="h-[42px] bg-slate-950 border border-slate-800 rounded-xl px-3 text-sm text-white outline-none focus:border-green-500"
-          />
-
-          <button
-            type="submit"
-            className="h-[42px] bg-orange-500 hover:bg-orange-400 text-slate-950 font-black rounded-xl transition"
-          >
-            + เพิ่มนักเตะ
-          </button>
-        </form>
-      </section>
-
-      {/* ===================================================
-          2. PLAYER LIST
-      =================================================== */}
-
-      <section className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-        {/* MAIN HEADER */}
-
-        <button
-          type="button"
-          onClick={() => {
-            setShowPlayerList((current) => !current);
-
-            if (showPlayerList) {
-              setExpandedTeamId(null);
-
-              setEditingPlayerId(null);
-            }
-          }}
-          className="w-full flex items-center justify-between gap-3 px-5 py-4 hover:bg-slate-800/50 transition"
-        >
-          <div className="text-left">
-            <h2 className="text-green-400 font-black">
-              2. รายชื่อนักเตะแต่ละทีม
-            </h2>
-
-            <p className="text-[10px] text-slate-500 mt-1">
-              ดูและแก้ไขชื่อ / เบอร์เสื้อนักเตะ
-            </p>
+            <p className="text-xs theme-muted">Live Match Control</p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] text-slate-500">
-              {teams.reduce(
-                (total, team) => total + (team.players?.length || 0),
-                0,
-              )}{" "}
-              คน
-            </span>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
 
-            <span
-              className={`text-slate-400 text-sm transition-transform duration-200 ${
-                showPlayerList ? "rotate-180" : ""
-              }`}
+            <button
+              type="button"
+              onClick={handleDownloadExcel}
+              disabled={exportingExcel}
+              className="text-xs px-3 py-2 bg-green-500 hover:bg-green-400 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-slate-950 font-black transition"
             >
-              ▼
-            </span>
+              {exportingExcel ? "⏳ Creating Excel..." : "Excel"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push("/")}
+              className="theme-toggle text-xs"
+            >
+              หน้าเว็บ
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="text-xs px-3 py-2 border border-red-500/40 rounded-lg text-red-400 hover:bg-red-500/10 transition"
+            >
+              Sign out
+            </button>
           </div>
-        </button>
+        </header>
 
-        {/* LIST */}
+        {/* ===================================================
+            1. ADD PLAYER
+        =================================================== */}
 
-        {showPlayerList && (
-          <div className="border-t border-slate-800 p-3 space-y-2">
-            {teams.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-500">
-                ยังไม่มีข้อมูลทีม
-              </div>
-            ) : (
-              teams.map((team) => {
-                const isExpanded = expandedTeamId === team.id;
+        <section className="theme-card border rounded-2xl p-5">
+          <h2 className="text-green-400 font-black mb-4">1. เพิ่มนักเตะ</h2>
 
-                const sortedPlayers = [...(team.players || [])].sort(
-                  (a, b) =>
-                    Number(a.number) - Number(b.number) ||
-                    a.name.localeCompare(b.name),
-                );
+          <form
+            onSubmit={handleAddPlayer}
+            className="grid grid-cols-1 md:grid-cols-4 gap-3"
+          >
+            <select
+              value={selectedTeamId ?? ""}
+              onChange={(event) =>
+                setSelectedTeamId(event.target.value || null)
+              }
+              className="admin-select theme-input w-full h-[42px] border rounded-xl px-3 text-sm outline-none focus:border-green-500"
+            >
+              <option value="">-- เลือกทีม --</option>
 
-                return (
-                  <div
-                    key={team.id}
-                    className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
-                  >
-                    {/* TEAM */}
+              {teams.map((team) => (
+                <option key={team.id} value={String(team.id)}>
+                  {team.name}
+                </option>
+              ))}
+            </select>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExpandedTeamId(isExpanded ? null : team.id);
-
-                        setEditingPlayerId(null);
-
-                        setEditPlayerNumber("");
-
-                        setEditPlayerName("");
-                      }}
-                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-800/50 transition"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-sm">
-                          ⚽
-                        </div>
-
-                        <div className="text-left">
-                          <p className="font-black text-white text-sm">
-                            {team.name}
-                          </p>
-
-                          <p className="text-[10px] text-slate-500">
-                            {sortedPlayers.length} นักเตะ
-                          </p>
-                        </div>
-                      </div>
-
-                      <span
-                        className={`text-xs text-slate-500 transition-transform duration-200 ${
-                          isExpanded ? "rotate-180" : ""
-                        }`}
-                      >
-                        ▼
-                      </span>
-                    </button>
-
-                    {/* PLAYERS */}
-
-                    {isExpanded && (
-                      <div className="border-t border-slate-800">
-                        {sortedPlayers.length === 0 ? (
-                          <div className="px-4 py-6 text-center text-xs text-slate-600">
-                            ยังไม่มีนักเตะในทีมนี้
-                          </div>
-                        ) : (
-                          sortedPlayers.map((player, index) => {
-                            const isEditing = editingPlayerId === player.id;
-
-                            return (
-                              <div
-                                key={player.id}
-                                className="border-b border-slate-800/70 last:border-b-0"
-                              >
-                                {/* VIEW */}
-
-                                {!isEditing && (
-                                  <div className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-900/60">
-                                    <div className="flex items-center gap-3 min-w-0">
-                                      <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center flex-shrink-0">
-                                        <span className="text-green-400 font-black text-sm">
-                                          #{player.number}
-                                        </span>
-                                      </div>
-
-                                      <div className="min-w-0">
-                                        <p className="font-bold text-sm text-white truncate">
-                                          {player.name}
-                                        </p>
-
-                                        <p className="text-[10px] text-slate-500">
-                                          ลำดับ {index + 1}
-                                        </p>
-                                      </div>
-                                    </div>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handleEditPlayer(player)}
-                                      className="flex-shrink-0 text-[11px] font-bold text-green-400 border border-green-500/30 hover:bg-green-500/10 px-3 py-1.5 rounded-lg transition"
-                                    >
-                                      ✎ Edit
-                                    </button>
-                                  </div>
-                                )}
-
-                                {/* EDIT */}
-
-                                {isEditing && (
-                                  <div className="px-4 py-4 bg-slate-900/70">
-                                    <div className="grid grid-cols-1 sm:grid-cols-[100px_1fr_auto] gap-2">
-                                      <div>
-                                        <label className="text-[9px] text-slate-500 block mb-1">
-                                          เบอร์เสื้อ
-                                        </label>
-
-                                        <input
-                                          type="number"
-                                          min="0"
-                                          value={editPlayerNumber}
-                                          onChange={(event) =>
-                                            setEditPlayerNumber(
-                                              event.target.value,
-                                            )
-                                          }
-                                          className="w-full h-[40px] bg-slate-950 border border-slate-700 rounded-xl px-3 text-sm text-white outline-none focus:border-green-500"
-                                        />
-                                      </div>
-
-                                      <div>
-                                        <label className="text-[9px] text-slate-500 block mb-1">
-                                          ชื่อนักเตะ
-                                        </label>
-
-                                        <input
-                                          type="text"
-                                          value={editPlayerName}
-                                          onChange={(event) =>
-                                            setEditPlayerName(
-                                              event.target.value,
-                                            )
-                                          }
-                                          className="w-full h-[40px] bg-slate-950 border border-slate-700 rounded-xl px-3 text-sm text-white outline-none focus:border-green-500"
-                                        />
-                                      </div>
-
-                                      <div className="flex items-end gap-2">
-                                        <button
-                                          type="button"
-                                          disabled={playerSaving}
-                                          onClick={() =>
-                                            handleSavePlayer(player.id)
-                                          }
-                                          className="h-[40px] px-4 bg-green-500 hover:bg-green-400 disabled:opacity-50 text-slate-950 font-black text-xs rounded-xl transition"
-                                        >
-                                          {playerSaving
-                                            ? "กำลังบันทึก..."
-                                            : "Save"}
-                                        </button>
-
-                                        <button
-                                          type="button"
-                                          disabled={playerSaving}
-                                          onClick={handleCancelEditPlayer}
-                                          className="h-[40px] px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition"
-                                        >
-                                          Cancel
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* ===================================================
-          3. MATCHES
-      =================================================== */}
-
-      <section className="space-y-4">
-        <h2 className="text-green-400 font-black">3. จัดการการแข่งขัน</h2>
-
-        {matches.length === 0 ? (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-sm text-slate-500">
-            ยังไม่มีข้อมูลการแข่งขัน
-          </div>
-        ) : (
-          matches.map((match) => (
-            <MatchAdminRow
-              key={match.id}
-              match={match}
-              teams={teams}
-              loading={loading}
-              onStartMatch={handleStartMatch}
-              onFinishMatch={handleFinishMatch}
-              onRefresh={fetchData}
-              adminAction={adminAction}
+            <input
+              type="number"
+              min="0"
+              value={playerNumber}
+              onChange={(event) => setPlayerNumber(event.target.value)}
+              placeholder="เบอร์เสื้อ"
+              className="theme-input h-[42px] border rounded-xl px-3 text-sm outline-none focus:border-green-500"
             />
-          ))
-        )}
-      </section>
+
+            <input
+              type="text"
+              value={playerName}
+              onChange={(event) => setPlayerName(event.target.value)}
+              placeholder="ชื่อนักเตะ"
+              className="theme-input h-[42px] border rounded-xl px-3 text-sm outline-none focus:border-green-500"
+            />
+
+            <button
+              type="submit"
+              disabled={addingPlayer}
+              className="h-[42px] bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-slate-950 font-black rounded-xl transition"
+            >
+              {addingPlayer ? "กำลังเพิ่ม..." : "+ เพิ่มนักเตะ"}
+            </button>
+          </form>
+        </section>
+
+        {/* ===================================================
+            2. PLAYER LIST
+        =================================================== */}
+
+        <section className="theme-card border rounded-2xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => {
+              setShowPlayerList((current) => !current);
+
+              if (showPlayerList) {
+                setExpandedTeamId(null);
+                setEditingPlayerId(null);
+              }
+            }}
+            className="w-full flex items-center justify-between gap-3 px-5 py-4 theme-hover transition"
+          >
+            <div className="text-left">
+              <h2 className="text-green-400 font-black">
+                2. รายชื่อนักเตะแต่ละทีม
+              </h2>
+
+              <p className="text-[10px] theme-muted mt-1">
+                ดูและแก้ไขชื่อ / เบอร์เสื้อนักเตะ
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] theme-muted">
+                {teams.reduce(
+                  (total, team) => total + (team.players?.length || 0),
+                  0,
+                )}{" "}
+                คน
+              </span>
+
+              <span
+                className={`theme-muted text-sm transition-transform duration-200 ${
+                  showPlayerList ? "rotate-180" : ""
+                }`}
+              >
+                ▼
+              </span>
+            </div>
+          </button>
+
+          {showPlayerList && (
+            <div className="border-t theme-border p-3 space-y-2">
+              {teams.length === 0 ? (
+                <div className="py-8 text-center text-sm theme-muted">
+                  ยังไม่มีข้อมูลทีม
+                </div>
+              ) : (
+                teams.map((team) => {
+                  const isExpanded = expandedTeamId === team.id;
+
+                  const sortedPlayers = [...(team.players || [])].sort(
+                    (a, b) =>
+                      Number(a.number) - Number(b.number) ||
+                      a.name.localeCompare(b.name),
+                  );
+
+                  return (
+                    <div
+                      key={team.id}
+                      className="theme-soft border theme-border rounded-xl overflow-hidden"
+                    >
+                      {/* TEAM */}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpandedTeamId(isExpanded ? null : team.id);
+
+                          setEditingPlayerId(null);
+
+                          setEditPlayerNumber("");
+
+                          setEditPlayerName("");
+                        }}
+                        className="w-full flex items-center justify-between px-4 py-3 theme-hover transition"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl theme-card border theme-border flex items-center justify-center text-sm">
+                            ⚽
+                          </div>
+
+                          <div className="text-left">
+                            <p className="font-black theme-text text-sm">
+                              {team.name}
+                            </p>
+
+                            <p className="text-[10px] theme-muted">
+                              {sortedPlayers.length} นักเตะ
+                            </p>
+                          </div>
+                        </div>
+
+                        <span
+                          className={`text-xs theme-muted transition-transform duration-200 ${
+                            isExpanded ? "rotate-180" : ""
+                          }`}
+                        >
+                          ▼
+                        </span>
+                      </button>
+
+                      {/* PLAYERS */}
+
+                      {isExpanded && (
+                        <div className="border-t theme-border">
+                          {sortedPlayers.length === 0 ? (
+                            <div className="px-4 py-6 text-center text-xs theme-muted">
+                              ยังไม่มีนักเตะในทีมนี้
+                            </div>
+                          ) : (
+                            sortedPlayers.map((player) => {
+                              const isEditing = editingPlayerId === player.id;
+
+                              return (
+                                <div
+                                  key={player.id}
+                                  className="border-b theme-border last:border-b-0"
+                                >
+                                  {/* VIEW */}
+
+                                  {!isEditing && (
+                                    <div className="flex items-center justify-between gap-3 px-4 py-3 theme-hover transition">
+                                      <div className="flex items-center gap-3 min-w-0">
+                                        <PlayerAvatar
+                                          imageUrl={player.image_url}
+                                          name={player.name}
+                                          size="md"
+                                        />
+
+                                        <div className="min-w-0">
+                                          <div className="font-bold theme-text truncate">
+                                            #{player.number} {player.name}
+                                          </div>
+
+                                          <div className="text-[10px] theme-muted">
+                                            {team.name}
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditPlayer(player)}
+                                        className="flex-shrink-0 text-[11px] font-bold text-green-400 border border-green-500/30 hover:bg-green-500/10 px-3 py-1.5 rounded-lg transition"
+                                      >
+                                        ✎ Edit
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {/* EDIT */}
+
+                                  {isEditing && (
+                                    <div className="px-4 py-4 theme-card">
+                                      <div className="flex items-center gap-3 mb-4">
+                                        <PlayerAvatar
+                                          imageUrl={player.image_url}
+                                          name={player.name}
+                                          size="lg"
+                                        />
+
+                                        <div>
+                                          <div className="text-xs font-bold theme-text">
+                                            #{player.number} {player.name}
+                                          </div>
+
+                                          <div className="text-[9px] theme-muted mt-1">
+                                            รูปนักเตะจัดการผ่าน Supabase
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div className="grid grid-cols-1 sm:grid-cols-[100px_1fr_auto] gap-2">
+                                        <div>
+                                          <label className="text-[9px] theme-muted block mb-1">
+                                            เบอร์เสื้อ
+                                          </label>
+
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            value={editPlayerNumber}
+                                            onChange={(event) =>
+                                              setEditPlayerNumber(
+                                                event.target.value,
+                                              )
+                                            }
+                                            className="theme-input w-full h-[40px] border rounded-xl px-3 text-sm outline-none focus:border-green-500"
+                                          />
+                                        </div>
+
+                                        <div>
+                                          <label className="text-[9px] theme-muted block mb-1">
+                                            ชื่อนักเตะ
+                                          </label>
+
+                                          <input
+                                            type="text"
+                                            value={editPlayerName}
+                                            onChange={(event) =>
+                                              setEditPlayerName(
+                                                event.target.value,
+                                              )
+                                            }
+                                            className="theme-input w-full h-[40px] border rounded-xl px-3 text-sm outline-none focus:border-green-500"
+                                          />
+                                        </div>
+
+                                        <div className="flex items-end gap-2">
+                                          <button
+                                            type="button"
+                                            disabled={playerSaving}
+                                            onClick={() =>
+                                              handleSavePlayer(player.id)
+                                            }
+                                            className="h-[40px] px-4 bg-green-500 hover:bg-green-400 disabled:opacity-50 text-slate-950 font-black text-xs rounded-xl transition"
+                                          >
+                                            {playerSaving
+                                              ? "กำลังบันทึก..."
+                                              : "Save"}
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            disabled={playerSaving}
+                                            onClick={handleCancelEditPlayer}
+                                            className="h-[40px] px-4 theme-soft border theme-border theme-secondary font-bold text-xs rounded-xl transition"
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* ===================================================
+            3. MATCHES
+        =================================================== */}
+
+        <section className="space-y-4">
+          {/* MATCH HEADER + CHECK LIST */}
+
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h2 className="text-green-400 font-black">3. จัดการการแข่งขัน</h2>
+
+              <p className="text-[10px] theme-muted mt-1">
+                เปิด Check List เพื่อดัน Match ปัจจุบันขึ้นด้านบน
+              </p>
+            </div>
+
+            <label
+              className={`
+                border
+                rounded-xl
+                px-3
+                py-2
+                flex
+                items-center
+                gap-3
+                cursor-pointer
+                select-none
+                transition
+                ${
+                  checkListMode
+                    ? "border-green-500 bg-green-500/10"
+                    : "theme-card theme-border"
+                }
+              `}
+            >
+              <input
+                type="checkbox"
+                checked={checkListMode}
+                onChange={(event) => setCheckListMode(event.target.checked)}
+                className="w-4 h-4 accent-green-500 cursor-pointer"
+              />
+
+              <div>
+                <div
+                  className={`text-xs font-black ${
+                    checkListMode ? "text-green-400" : "theme-text"
+                  }`}
+                >
+                  Current Match
+                </div>
+
+                {/* <div className="text-[9px] theme-muted">Current Match</div> */}
+              </div>
+            </label>
+          </div>
+
+          {displayedMatches.length === 0 ? (
+            <div className="theme-card border rounded-2xl p-8 text-center text-sm theme-muted">
+              ยังไม่มีข้อมูลการแข่งขัน
+            </div>
+          ) : (
+            displayedMatches.map((match) => (
+              <MatchAdminRow
+                key={match.id}
+                match={match}
+                teams={teams}
+                loading={loading}
+                isCurrentMatch={checkListMode && match.id === currentMatchId}
+                onStartMatch={handleStartMatch}
+                onFinishMatch={handleFinishMatch}
+                onRefresh={fetchData}
+                adminAction={adminAction}
+              />
+            ))
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -1084,16 +1490,16 @@ function MatchAdminRow({
   match,
   teams,
   loading,
+  isCurrentMatch,
   onStartMatch,
   onFinishMatch,
   onRefresh,
   adminAction,
 }: {
   match: Match;
-
   teams: Team[];
-
   loading: boolean;
+  isCurrentMatch: boolean;
 
   onStartMatch: (id: number) => Promise<void>;
 
@@ -1125,11 +1531,6 @@ function MatchAdminRow({
 
   const [isEditingFinished, setIsEditingFinished] = useState(false);
 
-  /*
-   * สำคัญ:
-   * ป้องกัน request ซ้อน
-   */
-
   const [eventSaving, setEventSaving] = useState(false);
 
   /* =======================================================
@@ -1151,9 +1552,9 @@ function MatchAdminRow({
       .from("match_events")
       .select(
         `
-              *,
-              player:player_id(*)
-            `,
+            *,
+            player:player_id(*)
+          `,
       )
       .eq("match_id", match.id)
       .order("minute", {
@@ -1199,7 +1600,7 @@ function MatchAdminRow({
     (match.status === "FINISHED" && isEditingFinished);
 
   /* =======================================================
-     SORT EVENT
+     SORT EVENTS
   ======================================================= */
 
   function sortEvents(eventList: MatchEvent[]) {
@@ -1233,7 +1634,6 @@ function MatchAdminRow({
 
     if (!selectedPlayer) {
       alert("กรุณาเลือกนักเตะ");
-
       return;
     }
 
@@ -1250,27 +1650,14 @@ function MatchAdminRow({
     setEventSaving(true);
 
     try {
-      /* ---------------------------------------------------
-         CALL API
-      --------------------------------------------------- */
-
       const result = await adminAction({
         action: "ADD_EVENT",
-
         matchId: match.id,
-
         teamId: selectedTeam,
-
         playerId,
-
         eventType,
-
         minute: minute === "" ? null : Number(minute),
       });
-
-      /* ---------------------------------------------------
-         SCORE UPDATE IMMEDIATELY
-      --------------------------------------------------- */
 
       if (typeof result.home_score === "number") {
         setHomeScore(result.home_score);
@@ -1280,14 +1667,9 @@ function MatchAdminRow({
         setAwayScore(result.away_score);
       }
 
-      /* ---------------------------------------------------
-         EVENT UPDATE IMMEDIATELY
-      --------------------------------------------------- */
-
       if (result.event) {
         const newEvent: MatchEvent = {
           ...result.event,
-
           player: result.event.player || selectedPlayerData,
         };
 
@@ -1304,29 +1686,12 @@ function MatchAdminRow({
         });
       }
 
-      /*
-       * Clear form ทันที
-       */
-
       setSelectedPlayer(null);
-
       setMinute("");
-
-      /* ---------------------------------------------------
-         CONFIRM DATABASE
-
-         UI เปลี่ยนไปแล้ว
-         ส่วนนี้เป็น sync ความถูกต้อง
-      --------------------------------------------------- */
 
       await Promise.all([fetchEvents(), onRefresh()]);
     } catch (error) {
       console.error("ADD EVENT ERROR:", error);
-
-      /*
-       * ถ้า fail
-       * โหลดข้อมูลจริงกลับมา
-       */
 
       await Promise.all([fetchEvents(), onRefresh()]);
 
@@ -1370,17 +1735,7 @@ function MatchAdminRow({
       return;
     }
 
-    /*
-     * Save state เดิม
-     * กรณี API fail
-     */
-
     const previousEvents = [...events];
-
-    /*
-     * Optimistic UI:
-     * ลบ Event ออกจากจอทันที
-     */
 
     setEvents((currentEvents) =>
       currentEvents.filter((item) => Number(item.id) !== Number(event.id)),
@@ -1391,13 +1746,8 @@ function MatchAdminRow({
     try {
       const result = await adminAction({
         action: "DELETE_EVENT",
-
         eventId: event.id,
       });
-
-      /*
-       * SCORE UPDATE IMMEDIATELY
-       */
 
       if (typeof result.home_score === "number") {
         setHomeScore(result.home_score);
@@ -1407,16 +1757,8 @@ function MatchAdminRow({
         setAwayScore(result.away_score);
       }
 
-      /*
-       * Confirm DB
-       */
-
       await Promise.all([fetchEvents(), onRefresh()]);
     } catch (error) {
-      /*
-       * Restore UI
-       */
-
       setEvents(previousEvents);
 
       await Promise.all([fetchEvents(), onRefresh()]);
@@ -1432,90 +1774,90 @@ function MatchAdminRow({
   ======================================================= */
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
-      {/* ===================================================
-          MATCH INFO
-      =================================================== */}
+    <div
+      className={`
+        theme-card
+        border
+        rounded-2xl
+        p-4
+        space-y-4
+        transition-all
+        ${
+          isCurrentMatch
+            ? "border-green-500 ring-1 ring-green-500/30"
+            : "theme-border"
+        }
+      `}
+    >
+      {/* MATCH INFO */}
 
-      <div className="flex flex-col sm:flex-row sm:justify-between gap-1 text-xs text-slate-400">
-        <span>Matchday {match.matchday}</span>
+      <div className="flex flex-col sm:flex-row sm:justify-between gap-1 text-xs theme-muted">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span>Matchday {match.matchday}</span>
+
+          {isCurrentMatch && (
+            <span className="bg-green-500/10 border border-green-500/30 text-green-400 px-2 py-0.5 rounded-full text-[9px] font-black">
+              ★ CURRENT MATCH
+            </span>
+          )}
+        </div>
 
         <span>
           {new Date(match.kickoff_time).toLocaleString("th-TH", {
             dateStyle: "medium",
-
             timeStyle: "short",
           })}
         </span>
       </div>
 
-      {/* ===================================================
-          SCORE
-      =================================================== */}
+      {/* SCORE */}
 
       <div className="flex items-center justify-between gap-2">
-        {/* HOME */}
-
-        <span className="w-4/12 text-right font-bold text-xs sm:text-sm truncate">
+        <span className="w-4/12 text-right font-bold text-xs sm:text-sm truncate theme-text">
           {match.home?.name}
         </span>
 
-        {/* SCORE */}
-
         <div className="w-4/12 flex justify-center items-center gap-2">
-          <div className="w-11 sm:w-12 h-10 flex items-center justify-center bg-slate-950 border border-slate-800 rounded-lg text-xl font-black text-green-400">
+          <div className="w-11 sm:w-12 h-10 flex items-center justify-center theme-soft border theme-border rounded-lg text-xl font-black text-green-400">
             {homeScore}
           </div>
 
-          <span className="font-black text-slate-500">-</span>
+          <span className="font-black theme-muted">-</span>
 
-          <div className="w-11 sm:w-12 h-10 flex items-center justify-center bg-slate-950 border border-slate-800 rounded-lg text-xl font-black text-green-400">
+          <div className="w-11 sm:w-12 h-10 flex items-center justify-center theme-soft border theme-border rounded-lg text-xl font-black text-green-400">
             {awayScore}
           </div>
         </div>
 
-        {/* AWAY */}
-
-        <span className="w-4/12 font-bold text-xs sm:text-sm truncate">
+        <span className="w-4/12 font-bold text-xs sm:text-sm truncate theme-text">
           {match.away?.name}
         </span>
       </div>
 
-      {/* ===================================================
-          MATCH CONTROL
-      =================================================== */}
+      {/* MATCH CONTROL */}
 
-      <div className="border-t border-slate-800 pt-3 space-y-3">
+      <div className="border-t theme-border pt-3 space-y-3">
         <div className="flex justify-between items-center gap-3">
-          {/* STATUS */}
-
           <div>
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider">
+            <div className="text-[10px] theme-muted uppercase tracking-wider">
               Match Status
             </div>
 
-            {/* UPCOMING */}
-
             {match.status === "UPCOMING" && (
-              <span className="text-xs font-black text-slate-300">
+              <span className="text-xs font-black theme-secondary">
                 ● UPCOMING
               </span>
             )}
-
-            {/* LIVE */}
 
             {match.status === "LIVE" && (
               <span className="inline-flex items-center gap-1.5 text-xs font-black text-red-400">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
                 </span>
                 LIVE
               </span>
             )}
-
-            {/* FINISHED */}
 
             {match.status === "FINISHED" && (
               <div className="flex items-center gap-2">
@@ -1532,8 +1874,6 @@ function MatchAdminRow({
             )}
           </div>
 
-          {/* UPCOMING CONTROL */}
-
           {match.status === "UPCOMING" && (
             <button
               disabled={loading}
@@ -1544,19 +1884,11 @@ function MatchAdminRow({
             </button>
           )}
 
-          {/* LIVE CONTROL */}
-
           {match.status === "LIVE" && (
             <button
               disabled={loading || eventSaving}
               onClick={() =>
-                onFinishMatch(
-                  match.id,
-
-                  Number(homeScore),
-
-                  Number(awayScore),
-                )
+                onFinishMatch(match.id, Number(homeScore), Number(awayScore))
               }
               className="bg-red-500 hover:bg-red-400 text-white px-4 py-2 rounded-xl text-xs font-black disabled:opacity-50 transition"
             >
@@ -1564,15 +1896,13 @@ function MatchAdminRow({
             </button>
           )}
 
-          {/* FINISHED CONTROL */}
-
           {match.status === "FINISHED" && (
             <div className="flex items-center gap-2">
               {!isEditingFinished ? (
                 <button
                   type="button"
                   onClick={() => setIsEditingFinished(true)}
-                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-orange-400 px-4 py-2 rounded-xl text-xs font-black transition"
+                  className="theme-soft border theme-border text-orange-400 px-4 py-2 rounded-xl text-xs font-black transition"
                 >
                   ✎ Edit Match
                 </button>
@@ -1590,10 +1920,8 @@ function MatchAdminRow({
           )}
         </div>
 
-        {/* EDIT WARNING */}
-
         {match.status === "FINISHED" && isEditingFinished && (
-          <div className="bg-orange-950/20 border border-orange-500/20 rounded-xl px-3 py-2 text-[10px] text-orange-300">
+          <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl px-3 py-2 text-[10px] text-orange-400">
             ⚠ กำลังแก้ไข Match ที่จบการแข่งขันแล้ว การเพิ่มหรือลบ Goal จะคำนวณ
             Score ใหม่อัตโนมัติ และการแก้ Yellow / Red จะคำนวณโทษแบนใหม่
           </div>
@@ -1604,9 +1932,9 @@ function MatchAdminRow({
           EVENT CONTROL
       =================================================== */}
 
-      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-3">
+      <div className="theme-soft border theme-border rounded-xl p-3 space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-xs font-bold text-slate-400">
+          <div className="text-xs font-bold theme-secondary">
             ⚽ 🟨 🟥 บันทึกเหตุการณ์
           </div>
 
@@ -1626,10 +1954,9 @@ function MatchAdminRow({
               value={selectedTeam}
               onChange={(event) => {
                 setSelectedTeam(Number(event.target.value));
-
                 setSelectedPlayer(null);
               }}
-              className="w-full h-[36px] bg-slate-900 border border-slate-800 rounded-xl px-2 text-xs text-white outline-none focus:border-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="admin-select theme-input w-full h-[36px] border rounded-xl px-2 text-xs outline-none focus:border-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value={match.home_team_id}>{match.home?.name}</option>
 
@@ -1640,28 +1967,12 @@ function MatchAdminRow({
           {/* PLAYER */}
 
           <div className="md:col-span-3">
-            <select
+            <PlayerPicker
+              players={activePlayers}
+              value={selectedPlayer}
               disabled={!canEditMatch || eventSaving}
-              value={selectedPlayer ?? ""}
-              onChange={(event) =>
-                setSelectedPlayer(event.target.value || null)
-              }
-              className="w-full h-[36px] bg-slate-900 border border-slate-800 rounded-xl px-2 text-xs text-white outline-none focus:border-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <option value="">-- เลือกนักเตะ --</option>
-
-              {[...activePlayers]
-                .sort(
-                  (a, b) =>
-                    Number(a.number) - Number(b.number) ||
-                    a.name.localeCompare(b.name),
-                )
-                .map((player) => (
-                  <option key={player.id} value={String(player.id)}>
-                    {player.number} {player.name}
-                  </option>
-                ))}
-            </select>
+              onChange={setSelectedPlayer}
+            />
           </div>
 
           {/* EVENT TYPE */}
@@ -1675,12 +1986,10 @@ function MatchAdminRow({
                   event.target.value as "GOAL" | "YELLOW_CARD" | "RED_CARD",
                 )
               }
-              className="w-full h-[36px] bg-slate-900 border border-slate-800 rounded-xl px-2 text-xs text-white outline-none focus:border-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="admin-select theme-input w-full h-[36px] border rounded-xl px-2 text-xs outline-none focus:border-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="GOAL">⚽ Goal</option>
-
               <option value="YELLOW_CARD">🟨 Yellow</option>
-
               <option value="RED_CARD">🟥 Red</option>
             </select>
           </div>
@@ -1695,7 +2004,7 @@ function MatchAdminRow({
               placeholder="นาที"
               value={minute}
               onChange={(event) => setMinute(event.target.value)}
-              className="w-full h-[36px] bg-slate-900 border border-slate-800 rounded-xl px-3 text-xs text-white outline-none focus:border-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="theme-input w-full h-[36px] border rounded-xl px-3 text-xs outline-none focus:border-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
 
@@ -1708,7 +2017,7 @@ function MatchAdminRow({
               className={`w-full h-[36px] rounded-xl font-black text-xs transition ${
                 canEditMatch && selectedPlayer && !eventSaving
                   ? "bg-green-500 hover:bg-green-400 text-slate-950"
-                  : "bg-slate-900 text-slate-600 cursor-not-allowed"
+                  : "theme-card theme-muted cursor-not-allowed opacity-60"
               }`}
             >
               {eventSaving
@@ -1728,15 +2037,32 @@ function MatchAdminRow({
 
         <div className="flex flex-wrap gap-2 pt-1">
           {events.length === 0 ? (
-            <span className="text-[10px] text-slate-600">
-              ยังไม่มีเหตุการณ์
-            </span>
+            <span className="text-[10px] theme-muted">ยังไม่มีเหตุการณ์</span>
           ) : (
             events.map((event) => (
               <div
                 key={event.id}
-                className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs flex items-center gap-1"
+                className="
+                  theme-card
+                  border
+                  theme-border
+                  rounded-xl
+                  px-2.5
+                  py-1.5
+                  text-xs
+                  flex
+                  items-center
+                  gap-2
+                "
               >
+                {event.player && (
+                  <PlayerAvatar
+                    imageUrl={event.player.image_url}
+                    name={event.player.name}
+                    size="xs"
+                  />
+                )}
+
                 <span>
                   {event.event_type === "GOAL"
                     ? "⚽"
@@ -1745,8 +2071,8 @@ function MatchAdminRow({
                       : "🟥"}
                 </span>
 
-                <span className="text-slate-200">
-                  No. {event.player?.number} {event.player?.name}
+                <span className="theme-secondary">
+                  #{event.player?.number} {event.player?.name}
                   {event.minute !== null && event.minute !== undefined
                     ? ` (${event.minute}')`
                     : ""}
